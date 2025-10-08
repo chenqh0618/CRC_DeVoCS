@@ -13,4 +13,4 @@ Metastasis is a complex evolutionary process that remains the primary cause of c
 This work reframes metastasis not as a singular, late-stage event, but as an early, systemic, and cooperative process, offering new perspectives for therapeutic intervention.
 
 
-[](figures/analysis_process.png)
+![figures](figures/analysis_process.png)
