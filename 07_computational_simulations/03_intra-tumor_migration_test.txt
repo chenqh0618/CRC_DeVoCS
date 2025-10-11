@@ -1,0 +1,324 @@
+# get data ---------------------------------------------------------------------
+pjdir <- "/public/data/cqh_project/crc/simulation/"
+setwd(pjdir)
+library(tidyverse)
+library(data.table)
+library(parallel)
+library(treedataverse)
+library(adegenet)
+library(poppr)
+
+source("~/software/script_tools/R_color.R")
+source("~/software/script_tools/function_lib.R")
+
+
+# simulation   -----------------------------------------------------------------
+## get data ----
+file_list <- list.files("res_simu/res_simulation_intra_tumor/", pattern = "Netural", full.names = T)
+file_name <- file_list[10]
+
+data <- mclapply(file_list, mc.cores = 24, function(file_name){
+  data <- fread(file_name)
+  
+  data <- lapply(1:nrow(data), function(i){
+    temp <- data[i,]
+    idx <- str_split(temp$cellmutation, ",", simplify = T) %>% as.vector()
+    
+    data.frame(x = temp$cellpos_x, y = temp$cellpos_y, idx)
+  }) %>% 
+    do.call(what = rbind)  
+  
+  data <- mutate(data, dataset = basename(file_name),
+                 idx = if_else(idx %in% c("", NA), "0", idx),
+                 migration_rate = str_extract(file_name, "(?<=_m-).*?(?=_)"),
+                 mutation_rate = str_extract(file_name, "(?<=_u-).*(?=\\.txt)"))
+  
+  return(data)
+}) %>% 
+  do.call(what = rbind) %>% 
+  mutate(across(contains("rate"), as.numeric))
+
+
+head(data); dim(data)
+unique(data$dataset) %>% length()
+
+
+
+top_linegae_number = 17
+
+data_raw <- filter(data, 
+                    migration_rate %in% c(0, 0.05, 0.15, 0.19),
+                    mutation_rate %in% c(0.03, 0.06, 0.09)) %>% 
+  group_by(migration_rate, mutation_rate, idx) %>%
+  mutate(cell_num = nrow(.)) %>% 
+  group_by(migration_rate, mutation_rate) %>% 
+  arrange(desc(cell_num)) %>% ungroup() %>% 
+  mutate(lineage_idx = factor(cell_num, 
+                            levels = unique(cell_num), 
+                            labels = paste0("r", 1:length(unique(cell_num))))) %>% 
+  filter(lineage_idx %in% paste0("r", 1:11)) %>% 
+  ungroup()
+
+
+
+## no mig ----
+data_no_mig <- filter(data_raw, 
+                    migration_rate == 0, 
+                    mutation_rate == 0.03 ) %>% 
+  mutate(sample = paste0("sample_",x,"_", y))
+
+count(data_no_mig, idx) %>% arrange(desc(n))
+idx1 = sample(unique(data_no_mig$idx), 1)
+idx2 = sample(unique(data_no_mig$idx), 1)
+
+
+temp <- select(data_no_mig, sample, idx) %>% 
+  filter(idx %in% c(idx1, idx2)) %>% 
+  distinct()  
+
+lineage_dist <- filter(data_no_mig, idx %in% c(idx1, idx2)) %>% 
+  select(sample, x, y) %>%
+  distinct() %>% 
+  column_to_rownames("sample") %>% 
+  dist(method = "euclidean") %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("from") %>% 
+  pivot_longer(cols = -from, names_to = "to", values_to = "dist") %>% 
+  filter(from != to) %>% 
+  left_join(temp, by = c("from" = "sample")) %>% 
+  rename(from_idx = idx) %>% 
+  left_join(temp, by = c("to" = "sample")) %>% 
+  rename(to_idx = idx)
+head(lineage_dist)
+
+data_plot_no_mig <- mutate(lineage_dist, 
+                    type = case_when(from_idx == to_idx & from_idx == idx1 ~ "lineage1",
+                                     from_idx == to_idx & from_idx == idx2 ~ "lineage2",
+                                     from_idx != to_idx ~ "between_lineage")) %>% 
+  select(type, dist) %>% 
+  mutate(sample = "migration_rate=0")
+
+
+ggplot(data = data_plot_no_mig, aes( x = dist,  group = type)) + 
+  geom_histogram(aes(y = stat(density), fill = type),  
+                 position = "identity", binwidth = 1, alpha = 0.5) +
+  geom_density(aes( color = type), linewidth = 2 ) +
+  theme_bw()
+
+
+## with mig ----
+data_with_mig <- filter(data_raw, 
+                      migration_rate == 0.19, 
+                      mutation_rate == 0.03 ) %>% 
+  mutate(sample = paste0("sample_",x,"_", y))
+
+count(data_with_mig, idx) %>% arrange(desc(n))
+idx1 = sample(unique(data_with_mig$idx), 1)
+idx2 = sample(unique(data_with_mig$idx), 1)
+
+
+
+
+temp <- select(data_with_mig, sample, idx) %>% 
+  filter(idx %in% c(idx1, idx2)) %>% 
+  distinct()  
+
+lineage_dist <- filter(data_with_mig, idx %in% c(idx1, idx2)) %>% 
+  select(sample, x, y) %>%
+  distinct() %>% 
+  column_to_rownames("sample") %>% 
+  dist(method = "euclidean") %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("from") %>% 
+  pivot_longer(cols = -from, names_to = "to", values_to = "dist") %>% 
+  filter(from != to) %>% 
+  left_join(temp, by = c("from" = "sample")) %>% 
+  rename(from_idx = idx) %>% 
+  left_join(temp, by = c("to" = "sample")) %>% 
+  rename(to_idx = idx)
+head(lineage_dist)
+
+data_plot_with_mig <- mutate(lineage_dist, 
+                           type = case_when(from_idx == to_idx & from_idx == idx1 ~ "lineage1",
+                                            from_idx == to_idx & from_idx == idx2 ~ "lineage2",
+                                            from_idx != to_idx ~ "between_lineage")) %>% 
+  select(dist, type) %>% 
+  mutate(sample = "migration_rate=0.19")
+
+ggplot(data = data_plot_with_mig, 
+       aes( x = dist,  group = type)) + 
+  geom_histogram(aes(y = stat(density), fill = type),  
+                 position = "identity", binwidth = 1, alpha = 0.5) +
+  geom_density(aes( color = type), linewidth = 2 ) +
+  theme_bw()
+
+# case1 ------------------------------------------------------------------------
+sample_coord <- data.table::fread("../amp_case1/data/raw/sample_info.csv") %>% 
+  mutate(x = x2,
+         y = y2,
+         z = if_else(region %in% c("N", "W"), z2* 0.3, z2)) %>%
+  filter(region == "D", sample != "")  
+
+data_raw <- select(sample_coord, sample, x, y, z) %>% 
+  filter(sample != "", !is.na(sample)) %>% 
+  column_to_rownames("sample") %>% 
+  dist(method = "euclidean") %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("from") %>% 
+  pivot_longer(cols = -from, names_to = "to", values_to = "dist") %>% 
+  filter(from != to)
+
+temp <- select(sample_coord, sample, z)
+data_raw <- left_join(data_raw, temp, by = c("from" = "sample") ) %>% 
+  rename(z_from = z) %>% 
+  left_join(temp, by = c("to" = "sample")) %>% 
+  rename(z_to = z)
+
+data_snv <- read_rds("../amp_case1/data/processed/s0_raw_data.rds") %>% 
+  mutate(vaf = alt / total,
+         vaf = if_else(is.na(vaf), 0, vaf)) %>%
+  select(site, sample, region, vaf) %>% 
+  mutate(site = paste0("site_", site)) %>% 
+  filter(region == "LM4", vaf >= 0.05)  %>% 
+  select(site, sample)
+
+count(data_snv, site) %>% 
+  arrange(desc(n))
+idx1 = "site_7_1097597"
+idx2 = "site_18_29598155"
+
+
+data <- filter(data_snv, site %in% c(idx1, idx2))
+
+data_case1 <- left_join(data_raw, data, by = c("from" = "sample")) %>% 
+  rename(from_idx = site) %>% 
+  left_join(data, by = c("to" = "sample")) %>% 
+  rename(to_idx = site) %>% 
+  filter(!is.na(from_idx),
+         !is.na(to_idx))
+
+ 
+data_case1 <- mutate(data_case1, 
+                     type = case_when(from_idx == to_idx & from_idx == idx1 ~ "lineage1",
+                                              from_idx == to_idx & from_idx == idx2 ~ "lineage2",
+                                              from_idx != to_idx ~ "between_lineage")) %>% 
+  select(type, dist) %>% 
+  mutate(sample = "case1")
+
+ggplot(data = data_case1, 
+       aes( x = dist,  group = type)) + 
+  geom_histogram(aes(y = stat(density), fill = type),  
+                 position = "identity", binwidth = 1, alpha = 0.5) +
+  geom_density(aes( color = type), linewidth = 2 ) +
+  theme_bw()
+
+
+# case2  -----------------------------------------------------------------------
+sample_coord <- data.table::fread("../amp_case2/data/raw/sample_coordinates.csv") %>%
+  mutate(x = x *10,
+         y = y * 10,
+         z = str_extract(sample, "(?<=_S).*(?=_)") %>% as.numeric(),
+         z = z * 0.3,
+         tumor = gsub("_.*", "", region),
+         region = gsub("_.*", "", sample))  %>% 
+  filter(region == "LM")
+
+data_raw <- select(sample_coord, sample, x, y, z) %>% 
+  filter(sample != "", !is.na(sample)) %>% 
+  column_to_rownames("sample") %>% 
+  dist(method = "euclidean") %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("from") %>% 
+  pivot_longer(cols = -from, names_to = "to", values_to = "dist") %>% 
+  filter(from != to)
+
+temp <- select(sample_coord, sample, z)
+data_raw <- left_join(data_raw, temp, by = c("from" = "sample") ) %>% 
+  rename(z_from = z) %>% 
+  left_join(temp, by = c("to" = "sample")) %>% 
+  rename(z_to = z)
+
+
+data_snv <- read_rds("../amp_case2/data/processed/s0_raw_data.rds") %>% 
+  mutate(vaf = alt / total,
+         vaf = if_else(is.na(vaf), 0, vaf)) %>%
+  select(site, sample, region, vaf) %>% 
+  mutate(site = paste0("site_", site)) %>% 
+  filter(region == "LM", vaf >= 0.05)  %>% 
+  select(site, sample)
+
+
+count(data_snv, site) %>% 
+  arrange(desc(n))
+idx1 = "site_8_133773744"
+idx2 = "site_1_154242881"
+
+idx1 = "site_12_56428405"
+
+data <- filter(data_snv, site %in% c(idx1, idx2))
+
+data_case2 <- left_join(data_raw, data, by = c("from" = "sample")) %>% 
+  rename(from_idx = site) %>% 
+  left_join(data, by = c("to" = "sample")) %>% 
+  rename(to_idx = site) %>% 
+  filter(!is.na(from_idx),
+         !is.na(to_idx))
+
+
+data_case2 <- mutate(data_case2, 
+                     type = case_when(from_idx == to_idx & from_idx == idx1 ~ "lineage1",
+                                      from_idx == to_idx & from_idx == idx2 ~ "lineage2",
+                                      from_idx != to_idx ~ "between_lineage")) %>% 
+  select(type, dist) %>% 
+  mutate(sample = "case2")
+
+ggplot(data = data_case2, 
+       aes( x = dist,  group = type)) + 
+  geom_histogram(aes(y = stat(density), fill = type),  
+                 position = "identity", binwidth = 1, alpha = 0.5) +
+  geom_density(aes( color = type), linewidth = 2 ) +
+  theme_bw()
+
+
+# summary ----------------------------------------------------------------------
+data_plot <- rbind(data_case1, data_case2, data_plot_with_mig, data_plot_no_mig)  %>% 
+  group_by(sample) %>% 
+  mutate(dist = dist/max(dist)*10) %>% 
+  ungroup() %>% 
+  mutate(sample = factor(sample, 
+                         levels = c("migration_rate=0", "migration_rate=0.19",
+                                    "case1", "case2")))
+
+ggplot(data = data_plot, 
+       aes( x = dist,  group = type)) + 
+  geom_histogram(aes(y = stat(density), fill = type),  
+                 position = "identity", 
+                 binwidth = 0.1, alpha = 0.6) +
+  geom_density(aes( color = type), 
+               linewidth = 1.5 ) +
+  theme_bw() +
+  facet_wrap(~sample, scales = "free") +
+  theme(strip.text = element_text(size =20),
+        axis.text = element_text(size = 14)) +
+  scale_fill_manual(values = c("grey", "steelblue", "darkred")) +
+  scale_color_manual(values = c("grey", "steelblue", "darkred"))
+
+
+res_ks <- lapply(c("lineage1", "lineage2"), function(lineage_name){
+  lapply(unique(data_plot$sample), function(sample_name){
+    temp <- filter(data_plot, type %in% c(lineage_name, "between_lineage"),
+                   sample == sample_name)
+    
+    res <- ks.test(dist ~ type, temp)
+    
+    data.frame(sample = sample_name, lineage = lineage_name,
+               D = res$statistic, P = res$p.value)
+  }) %>% do.call(what = rbind)
+}) %>% 
+  do.call(what = rbind)
+
+ 
