@@ -18,3 +18,9 @@ This work reframes metastasis not as a singular, late-stage event, but as an ear
 
 ## Uploading
 The code upload is underway and is projected to finish by October 13, 2025.
+
+
+## Contact
+
+For questions about the code or analysis, please contact Chen at fountain0618@qq.com or open an issue in this repository.
+
