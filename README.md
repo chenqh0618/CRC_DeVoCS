@@ -1,6 +1,6 @@
 # Dense Volumetric Mapping Reveals Spatio-Temporal Evolutionary Trajectories in Colorectal Cancer Metastasis
 
-This repository contains the analysis code and key data files to reproduce the findings presented in our manuscript, "Dense Volumetric Mapping Reveals Spatio-Temporal Evolutionary Trajectories in Colorectal Cancer Metastasis".
+This repository contains the analysis code to reproduce the findings presented in our manuscript, "Dense Volumetric Mapping Reveals Spatio-Temporal Evolutionary Trajectories in Colorectal Cancer Metastasis".
 
 ## Project Overview
 
